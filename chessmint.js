@@ -14,23 +14,26 @@
   let activeBoard = null;
   let depthBarProgress = null;
   let evalBarElement = null;
+  let observer = null;
 
-  // Minta konfigurasi awal dari loader.js
   window.addEventListener('ChessMintSendOptions', (e) => {
-    currentOptions = { ...currentOptions, ...e.detail };
+    currentOptions = { ...currentOptions, ...(e.detail || {}) };
     updateUIState();
   });
 
   window.addEventListener('ChessMintUpdateOptions', (e) => {
-    currentOptions = { ...currentOptions, ...e.detail };
+    currentOptions = { ...currentOptions, ...(e.detail || {}) };
     updateUIState();
   });
 
   window.dispatchEvent(new CustomEvent('ChessMintGetOptions'));
 
-  // Deteksi elemen <chess-board>
   function init() {
-    const observer = new MutationObserver(() => {
+    if (observer) {
+        observer.disconnect();
+    }
+
+    observer = new MutationObserver((mutations) => {
       const board = document.querySelector('chess-board');
       if (board && board !== activeBoard) {
         activeBoard = board;
@@ -48,34 +51,59 @@
   }
 
   function attachToBoard(board) {
+    if (!board) return;
     console.log('[ChessMint] Attached to board!');
     createUIComponents(board);
 
-    // Buka proteksi objek game catur
-    const game = board.game || board.controller;
+    const game = board.game || board.controller || (board.getGame && board.getGame());
+
     if (game && typeof game.on === 'function') {
-      game.on('Move', () => {
-        handleMove(game);
-      });
-      console.log('[ChessMint] Event Move Listener Ready.');
+      try {
+        game.on('Move', () => {
+          handleMove(game);
+        });
+        console.log('[ChessMint] Event Move Listener Ready.');
+      } catch(e) {
+          console.warn('[ChessMint] Error hooking move event:', e);
+      }
+    } else {
+        console.warn('[ChessMint] game object not found on board element.');
     }
   }
 
   function createUIComponents(board) {
-    const parentLayout = board.parentElement || board;
+    if (!board) return;
 
-    // Progress Bar Depth
-    if (!depthBarProgress) {
+    // Fallback to board if parentElement is missing or document
+    let parentLayout = board.parentElement;
+    if (!parentLayout || parentLayout === document.body || parentLayout === document.documentElement) {
+        parentLayout = board;
+    }
+
+    // We want to insert the UI near the board, typically before or after
+    let insertParent = parentLayout.parentNode || parentLayout;
+
+    if (!document.querySelector('.depthBarLayout')) {
       const container = document.createElement('div');
       container.className = 'depthBarLayout';
       depthBarProgress = document.createElement('div');
       depthBarProgress.className = 'depthBarProgress';
       container.appendChild(depthBarProgress);
-      parentLayout.parentNode.insertBefore(container, parentLayout.nextSibling);
+
+      try {
+          if(insertParent === parentLayout) {
+             insertParent.appendChild(container);
+          } else {
+             insertParent.insertBefore(container, parentLayout.nextSibling);
+          }
+      } catch(e) {
+          console.warn('[ChessMint] Failed to insert depth bar', e);
+      }
+    } else {
+        depthBarProgress = document.querySelector('.depthBarProgress');
     }
 
-    // Evaluation Bar
-    if (!evalBarElement) {
+    if (!document.querySelector('.cm-eval-container')) {
       evalBarElement = document.createElement('div');
       evalBarElement.className = 'cm-eval-container';
       evalBarElement.innerHTML = `
@@ -83,14 +111,24 @@
         <div class="cm-eval-fill-black" id="cm-eval-black"></div>
         <div class="cm-eval-fill-white" id="cm-eval-white"></div>
       `;
-      parentLayout.parentNode.insertBefore(evalBarElement, parentLayout);
+      try {
+          if(insertParent === parentLayout) {
+              insertParent.insertBefore(evalBarElement, insertParent.firstChild);
+          } else {
+              insertParent.insertBefore(evalBarElement, parentLayout);
+          }
+      } catch(e) {
+           console.warn('[ChessMint] Failed to insert eval bar', e);
+      }
+    } else {
+        evalBarElement = document.querySelector('.cm-eval-container');
     }
 
     updateUIState();
   }
 
   function updateUIState() {
-    if (depthBarProgress?.parentElement) {
+    if (depthBarProgress && depthBarProgress.parentElement) {
       depthBarProgress.parentElement.style.display = currentOptions.depth_bar ? 'block' : 'none';
     }
     if (evalBarElement) {
@@ -104,24 +142,28 @@
       let prog = 0;
       const interval = setInterval(() => {
         prog += 20;
-        depthBarProgress.style.width = `${Math.min(prog, 100)}%`;
+        if(depthBarProgress) {
+            depthBarProgress.style.width = `${Math.min(prog, 100)}%`;
+        }
         if (prog >= 100) clearInterval(interval);
       }, 80);
     }
 
-    // Fitur Auto Move untuk Bot Testing
     if (currentOptions.auto_move && game) {
       setTimeout(() => {
-        if (typeof game.getLegalMoves === 'function') {
-          const legalMoves = game.getLegalMoves();
-          if (legalMoves && legalMoves.length > 0) {
-            // Pilih langkah acak/legal dari game controller
-            const selectedMove = legalMoves[Math.floor(Math.random() * legalMoves.length)];
-            selectedMove.userGenerated = true;
-            if (typeof game.move === 'function') {
-              game.move(selectedMove);
+        try {
+            if (typeof game.getLegalMoves === 'function') {
+              const legalMoves = game.getLegalMoves();
+              if (legalMoves && legalMoves.length > 0) {
+                const selectedMove = legalMoves[Math.floor(Math.random() * legalMoves.length)];
+                selectedMove.userGenerated = true;
+                if (typeof game.move === 'function') {
+                  game.move(selectedMove);
+                }
+              }
             }
-          }
+        } catch(e) {
+            console.warn('[ChessMint] Auto-move failed:', e);
         }
       }, 600);
     }

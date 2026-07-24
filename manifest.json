@@ -9,7 +9,7 @@
       "matches": ["https://www.chess.com/*"],
       "js": ["loader.js"],
       "css": ["styles.css"],
-      "run_at": "document_start"
+      "run_at": "document_end"
     }
   ],
   "web_accessible_resources": [
