@@ -6,7 +6,7 @@
   "description": "Advanced Real-time Chess Engine Assistant",
   "content_scripts": [
     {
-      "matches": ["https://www.chess.com/*"],
+      "matches": ["*://*.chess.com/*"],
       "js": ["chessmint.js"],
       "css": ["styles.css"],
       "run_at": "document_end"
@@ -14,8 +14,11 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["stockfish.js"],
-      "matches": ["https://www.chess.com/*"]
+      "resources": [
+        "stockfish.js",
+        "styles.css"
+      ],
+      "matches": ["*://*.chess.com/*"]
     }
   ],
   "action": {
