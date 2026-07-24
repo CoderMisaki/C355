@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "ChessMint",
   "short_name": "ChessMint",
-  "version": "2.0.0",
-  "description": "Chess.com assistant",
+  "version": "3.0.0",
+  "description": "Advanced Chess Assistant Extension",
   "content_scripts": [
     {
       "matches": ["https://www.chess.com/*"],
@@ -23,6 +23,7 @@
   },
   "permissions": [
     "storage",
-    "tabs"
+    "tabs",
+    "activeTab"
   ]
 }
