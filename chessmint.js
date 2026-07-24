@@ -17,6 +17,8 @@
   let depthBarProgress = null;
   let evalBarElement = null;
   let observer = null;
+  let svgOverlay = null;
+  let activeMoveMarkings = [];
 
   window.addEventListener('ChessMintSendOptions', (e) => {
     currentOptions = { ...currentOptions, ...(e.detail || {}) };
@@ -30,12 +32,92 @@
 
   window.dispatchEvent(new CustomEvent('ChessMintGetOptions'));
 
+  // --- A.C.A.S Style Universal Board Drawer (SVG Overlay) ---
+  class BoardDrawer {
+    constructor(boardElement) {
+      this.board = boardElement;
+      this.initSvg();
+    }
+
+    initSvg() {
+      if (document.getElementById('chessmint-svg-layer')) return;
+      svgOverlay = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svgOverlay.id = 'chessmint-svg-layer';
+      svgOverlay.style.cssText = 'position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:9999;';
+      
+      if (getComputedStyle(this.board).position === 'static') {
+        this.board.style.position = 'relative';
+      }
+      this.board.appendChild(svgOverlay);
+    }
+
+    drawArrow(fromSquare, toSquare, color = '#10b981') {
+      if (!svgOverlay) return;
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('stroke', color);
+      line.setAttribute('stroke-width', '6');
+      line.setAttribute('stroke-opacity', '0.8');
+      line.setAttribute('stroke-linecap', 'round');
+      svgOverlay.appendChild(line);
+      activeMoveMarkings.push(line);
+    }
+
+    clearMarkings() {
+      activeMoveMarkings.forEach(el => el.remove());
+      activeMoveMarkings = [];
+    }
+  }
+
+  // --- A.C.A.S Style Human-Like Move Engine (Anti-Ban) ---
+  class AutomaticMoveEngine {
+    constructor(fromSquare, toSquare) {
+      this.fromSquare = fromSquare;
+      this.toSquare = toSquare;
+    }
+
+    async execute() {
+      const fromEl = document.querySelector(`[data-square="${this.fromSquare}"]`);
+      const toEl = document.querySelector(`[data-square="${this.toSquare}"]`);
+
+      if (!fromEl || !toEl) return;
+
+      let delay = 1200;
+      if (currentOptions.human_move_pro) {
+        delay = Math.floor(Math.random() * 2500) + 1500;
+      } else if (currentOptions.anti_ban) {
+        delay = Math.floor(Math.random() * 1200) + 800;
+      }
+
+      await new Promise(r => setTimeout(r, delay));
+
+      this.triggerPointerEvent(fromEl, 'pointerdown');
+      await new Promise(r => setTimeout(r, Math.random() * 80 + 40));
+      this.triggerPointerEvent(fromEl, 'pointerup');
+
+      await new Promise(r => setTimeout(r, Math.random() * 150 + 100));
+
+      this.triggerPointerEvent(toEl, 'pointerdown');
+      await new Promise(r => setTimeout(r, Math.random() * 80 + 40));
+      this.triggerPointerEvent(toEl, 'pointerup');
+    }
+
+    triggerPointerEvent(element, eventType) {
+      const rect = element.getBoundingClientRect();
+      const clientX = rect.left + rect.width / 2 + (Math.random() - 0.5) * 6;
+      const clientY = rect.top + rect.height / 2 + (Math.random() - 0.5) * 6;
+
+      const opts = { bubbles: true, cancelable: true, clientX, clientY };
+      element.dispatchEvent(new PointerEvent(eventType, opts));
+      element.dispatchEvent(new MouseEvent(eventType === 'pointerdown' ? 'mousedown' : 'mouseup', opts));
+    }
+  }
+
   function init() {
     if (observer) {
         observer.disconnect();
     }
 
-    observer = new MutationObserver((mutations) => {
+    observer = new MutationObserver(() => {
       const board = document.querySelector('chess-board');
       if (board && board !== activeBoard) {
         activeBoard = board;
@@ -52,46 +134,32 @@
     }
   }
 
+  let boardDrawerInstance = null;
+
   function attachToBoard(board) {
     if (!board) return;
-    console.log('[ChessMint] Attached to board!');
+    console.log('[ChessMint Pro] Attached to board with A.C.A.S architecture!');
     createUIComponents(board);
+    boardDrawerInstance = new BoardDrawer(board);
 
-    let retryCount = 0;
-    const tryHookGame = () => {
-      const game = board.game || board.controller || (board.getGame && board.getGame());
-
-      if (game && typeof game.on === 'function') {
-        try {
-          game.on('Move', () => {
-            handleMove(game);
-          });
-          console.log('[ChessMint] Event Move Listener Ready.');
-        } catch(e) {
-            console.warn('[ChessMint] Error hooking move event:', e);
-        }
-      } else {
-          if (retryCount < 10) {
-              retryCount++;
-              setTimeout(tryHookGame, 500);
-          } else {
-              console.warn('[ChessMint] game object not found on board element after retries.');
-          }
+    const boardObserver = new MutationObserver((mutations) => {
+      let changed = mutations.some(m => m.type === 'childList' || m.attributeName === 'class');
+      if (changed) {
+        handleMove();
       }
-    };
-    tryHookGame();
+    });
+
+    boardObserver.observe(board, { childList: true, subtree: true, attributes: true });
   }
 
   function createUIComponents(board) {
     if (!board) return;
 
-    // Fallback to board if parentElement is missing or document
     let parentLayout = board.parentElement;
     if (!parentLayout || parentLayout === document.body || parentLayout === document.documentElement) {
         parentLayout = board;
     }
 
-    // We want to insert the UI near the board, typically before or after
     let insertParent = parentLayout.parentNode || parentLayout;
 
     if (!document.querySelector('.depthBarLayout')) {
@@ -117,7 +185,7 @@
     if (!document.querySelector('.cm-active-status')) {
       const activeStatus = document.createElement('div');
       activeStatus.className = 'cm-active-status';
-      activeStatus.innerText = '🟢 Extension Active';
+      activeStatus.innerText = '🟢 ChessMint Pro Active';
       activeStatus.style.cssText = 'text-align: center; color: #10b981; font-weight: bold; padding: 5px; font-size: 14px;';
       try {
           if(insertParent === parentLayout) {
@@ -163,44 +231,17 @@
     }
   }
 
-  function handleMove(game) {
+  function handleMove() {
     if (depthBarProgress && currentOptions.depth_bar) {
       depthBarProgress.style.width = '0%';
       let prog = 0;
       const interval = setInterval(() => {
-        prog += 20;
+        prog += 25;
         if(depthBarProgress) {
             depthBarProgress.style.width = `${Math.min(prog, 100)}%`;
         }
         if (prog >= 100) clearInterval(interval);
-      }, 80);
-    }
-
-    if (currentOptions.auto_move && game) {
-      let delay = 600;
-      if (currentOptions.human_move_pro) {
-          // Human-like delay between 1.5s and 4s
-          delay = Math.floor(Math.random() * 2500) + 1500;
-      } else if (currentOptions.anti_ban) {
-          // Anti-ban delay between 0.8s and 2s
-          delay = Math.floor(Math.random() * 1200) + 800;
-      }
-      setTimeout(() => {
-        try {
-            if (typeof game.getLegalMoves === 'function') {
-              const legalMoves = game.getLegalMoves();
-              if (legalMoves && legalMoves.length > 0) {
-                const selectedMove = legalMoves[Math.floor(Math.random() * legalMoves.length)];
-                selectedMove.userGenerated = true;
-                if (typeof game.move === 'function') {
-                  game.move(selectedMove);
-                }
-              }
-            }
-        } catch(e) {
-            console.warn('[ChessMint] Auto-move failed:', e);
-        }
-      }, delay);
+      }, 60);
     }
   }
 
