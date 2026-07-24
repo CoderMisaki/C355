@@ -14,6 +14,12 @@
       "run_at": "document_end"
     }
   ],
+  "web_accessible_resources": [
+    {
+      "resources": ["stockfish.js"],
+      "matches": ["*://*.chess.com/*"]
+    }
+  ],
   "host_permissions": [
     "https://cdnjs.cloudflare.com/*"
   ],
