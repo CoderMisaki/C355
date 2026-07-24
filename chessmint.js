@@ -20,17 +20,22 @@
   let svgOverlay = null;
   let activeMoveMarkings = [];
 
-  window.addEventListener('ChessMintSendOptions', (e) => {
-    currentOptions = { ...currentOptions, ...(e.detail || {}) };
-    updateUIState();
-  });
+  // Ambil opsi langsung dari storage ekstensi
+  if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.sync) {
+    chrome.storage.sync.get(currentOptions, (opts) => {
+      currentOptions = { ...currentOptions, ...opts };
+      updateUIState();
+    });
 
-  window.addEventListener('ChessMintUpdateOptions', (e) => {
-    currentOptions = { ...currentOptions, ...(e.detail || {}) };
-    updateUIState();
-  });
-
-  window.dispatchEvent(new CustomEvent('ChessMintGetOptions'));
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === 'sync') {
+        for (let key in changes) {
+          currentOptions[key] = changes[key].newValue;
+        }
+        updateUIState();
+      }
+    });
+  }
 
   // --- A.C.A.S Style Universal Board Drawer (SVG Overlay) ---
   class BoardDrawer {
@@ -138,7 +143,7 @@
 
   function attachToBoard(board) {
     if (!board) return;
-    console.log('[ChessMint Pro] Attached to board with A.C.A.S architecture!');
+    console.log('[ChessMint Pro] Attached to board successfully!');
     createUIComponents(board);
     boardDrawerInstance = new BoardDrawer(board);
 
