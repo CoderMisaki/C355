@@ -1,6 +1,11 @@
+/**
+ * 🚀 ChessMint Pro - Stockfish Engine Integrated Assistant
+ */
+
 (function () {
   'use strict';
 
+  // --- CONFIGURATION & STATE ---
   let currentOptions = {
     depth: 15,
     threads: 2,
@@ -13,46 +18,235 @@
     human_move_pro: true
   };
 
-  let activeBoard = null;
-  let depthBarProgress = null;
-  let evalBarElement = null;
-  let evalScoreElement = null;
-  let evalBlackFill = null;
-  let evalWhiteFill = null;
-  let observer = null;
-  let svgOverlay = null;
-  let activeMoveMarkings = [];
+  // --- 1. OPTIONS MANAGER ---
+  class OptionsManager {
+    static init(callback) {
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.sync) {
+        chrome.storage.sync.get(currentOptions, (opts) => {
+          currentOptions = { ...currentOptions, ...opts };
+          if (callback) callback();
+        });
 
-  // Sinkronisasi Opsi dari Storage secara Real-Time
-  if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.sync) {
-    chrome.storage.sync.get(currentOptions, (opts) => {
-      currentOptions = { ...currentOptions, ...opts };
-      updateUIState();
-    });
-
-    chrome.storage.onChanged.addListener((changes, area) => {
-      if (area === 'sync') {
-        for (let key in changes) {
-          currentOptions[key] = changes[key].newValue;
-        }
-        updateUIState();
+        chrome.storage.onChanged.addListener((changes, area) => {
+          if (area === 'sync') {
+            for (let key in changes) {
+              currentOptions[key] = changes[key].newValue;
+            }
+            if (callback) callback();
+          }
+        });
       }
-    });
+    }
   }
 
-  // --- Board Drawer (SVG Overlay dengan Panah Lebih Kecil & Tajam) ---
+  // --- 2. STOCKFISH ENGINE INTEGRATION ---
+  class StockfishEngine {
+    constructor() {
+      this.worker = null;
+      this.isReady = false;
+      this.onAnalysisCallback = null;
+      this.initEngine();
+    }
+
+    initEngine() {
+      try {
+        // Memuat Stockfish Worker (Menggunakan CDN Fallback jika lokal belum ada)
+        const stockfishUrl = typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL
+          ? chrome.runtime.getURL('stockfish.js')
+          : 'https://cdnjs.cloudflare.com/ajax/libs/stockfish.js/10.0.2/stockfish.js';
+
+        // Inisialisasi Worker dari Blob agar aman dari pembatasan CSP extension
+        const workerScript = `importScripts('${stockfishUrl}');`;
+        const blob = new Blob([workerScript], { type: 'application/javascript' });
+        this.worker = new Worker(URL.createObjectURL(blob));
+
+        this.worker.onmessage = (event) => this.handleEngineMessage(event.data);
+        this.sendCommand('uci');
+        this.sendCommand('isready');
+      } catch (e) {
+        console.warn('[ChessMint] WebWorker Stockfish failed, using fallback Worker loader:', e);
+        // Direct Fallback Worker
+        this.worker = new Worker('https://cdnjs.cloudflare.com/ajax/libs/stockfish.js/10.0.2/stockfish.js');
+        this.worker.onmessage = (event) => this.handleEngineMessage(event.data);
+      }
+    }
+
+    sendCommand(cmd) {
+      if (this.worker) {
+        this.worker.postMessage(cmd);
+      }
+    }
+
+    stop() {
+      this.sendCommand('stop');
+    }
+
+    analyze(fen, targetDepth, onAnalysis) {
+      this.onAnalysisCallback = onAnalysis;
+      this.stop();
+      this.sendCommand(`position fen ${fen}`);
+      this.sendCommand(`go depth ${targetDepth}`);
+    }
+
+    handleEngineMessage(msg) {
+      if (typeof msg !== 'string') return;
+
+      if (msg === 'readyok') {
+        this.isReady = true;
+      }
+
+      // Parsing evaluasi centipawn / mate & depth dari UCI output
+      if (msg.startsWith('info depth')) {
+        const depthMatch = msg.match(/depth (\d+)/);
+        const cpMatch = msg.match(/score cp (-?\d+)/);
+        const mateMatch = msg.match(/score mate (-?\d+)/);
+        const pvMatch = msg.match(/ pv ([a-h][1-8][a-h][1-8])/);
+
+        const depth = depthMatch ? parseInt(depthMatch[1], 10) : 0;
+        let score = '+0.0';
+        let cpValue = 0;
+
+        if (cpMatch) {
+          cpValue = parseInt(cpMatch[1], 10) / 100;
+          score = cpValue >= 0 ? `+${cpValue.toFixed(1)}` : `${cpValue.toFixed(1)}`;
+        } else if (mateMatch) {
+          score = `M${mateMatch[1]}`;
+          cpValue = parseInt(mateMatch[1], 10) > 0 ? 10 : -10;
+        }
+
+        const predictedMove = pvMatch ? pvMatch[1] : null;
+
+        if (this.onAnalysisCallback) {
+          this.onAnalysisCallback({
+            type: 'info',
+            depth,
+            score,
+            cpValue,
+            predictedMove
+          });
+        }
+      }
+
+      // Parsing hasil akhir langkah terbaik (bestmove e2e4)
+      if (msg.startsWith('bestmove')) {
+        const match = msg.match(/^bestmove ([a-h][1-8])([a-h][1-8])/);
+        if (match && this.onAnalysisCallback) {
+          this.onAnalysisCallback({
+            type: 'bestmove',
+            from: match[1],
+            to: match[2]
+          });
+        }
+      }
+    }
+  }
+
+  // --- 3. DOM BOARD PARSER (DOM -> FEN CONVERTER) ---
+  class DOMBoardParser {
+    static getBoardElement() {
+      return document.querySelector('wc-chess-board') ||
+             document.querySelector('chess-board') ||
+             document.querySelector('#board-layout-chessboard');
+    }
+
+    static parseFen(boardElement) {
+      if (!boardElement) return null;
+
+      const grid = Array(8).fill(null).map(() => Array(8).fill(''));
+      const pieces = boardElement.querySelectorAll('.piece, [data-piece], piece');
+
+      pieces.forEach(p => {
+        let pieceStr = '';
+        let squareStr = '';
+
+        if (p.hasAttribute('data-piece')) {
+          pieceStr = p.getAttribute('data-piece');
+        } else {
+          const match = p.className.match(/\b([bw][prnbqk])\b/i);
+          if (match) pieceStr = match[1].toLowerCase();
+        }
+
+        if (p.hasAttribute('data-square')) {
+          squareStr = p.getAttribute('data-square');
+        } else {
+          const sqMatch = p.className.match(/\bsquare-(\d)(\d)\b/);
+          if (sqMatch) {
+            const file = String.fromCharCode(96 + parseInt(sqMatch[1], 10));
+            const rank = sqMatch[2];
+            squareStr = `${file}${rank}`;
+          }
+        }
+
+        if (pieceStr && squareStr && squareStr.length === 2) {
+          const fileIdx = squareStr.charCodeAt(0) - 97;
+          const rankIdx = 8 - parseInt(squareStr[1], 10);
+
+          const color = pieceStr[0];
+          const type = pieceStr[1].toUpperCase();
+          const fenChar = color === 'w' ? type : type.toLowerCase();
+
+          if (fileIdx >= 0 && fileIdx < 8 && rankIdx >= 0 && rankIdx < 8) {
+            grid[rankIdx][fileIdx] = fenChar;
+          }
+        }
+      });
+
+      let fenRows = [];
+      for (let r = 0; r < 8; r++) {
+        let rowStr = '';
+        let emptyCount = 0;
+        for (let c = 0; c < 8; c++) {
+          if (grid[r][c] === '') {
+            emptyCount++;
+          } else {
+            if (emptyCount > 0) {
+              rowStr += emptyCount;
+              emptyCount = 0;
+            }
+            rowStr += grid[r][c];
+          }
+        }
+        if (emptyCount > 0) rowStr += emptyCount;
+        fenRows.push(rowStr);
+      }
+
+      // Deteksi giliran melangkah (Turn detection)
+      const turn = DOMBoardParser.detectActiveTurn(boardElement);
+
+      return `${fenRows.join('/')} ${turn} KQkq - 0 1`;
+    }
+
+    static detectActiveTurn(boardElement) {
+      // Papan dibalik = Hitam (Black), standar = Putih (White)
+      const isFlipped = boardElement.classList.contains('flipped');
+      const highlights = boardElement.querySelectorAll('.highlight');
+      if (highlights.length >= 2) {
+        // Jika ada highlight gerakan terakhir, tentukan giliran dari elemen aktif
+        return isFlipped ? 'b' : 'w';
+      }
+      return 'w';
+    }
+  }
+
+  // --- 4. BOARD DRAWER (PRECISION SVG OVERLAY) ---
   class BoardDrawer {
     constructor(boardElement) {
       this.board = boardElement;
+      this.svgOverlay = null;
+      this.activeMarkings = [];
       this.initSvg();
     }
 
     initSvg() {
-      if (document.getElementById('chessmint-svg-layer')) return;
-      svgOverlay = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      svgOverlay.id = 'chessmint-svg-layer';
-      svgOverlay.style.cssText = 'position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:9999;';
-      
+      if (document.getElementById('chessmint-svg-layer')) {
+        this.svgOverlay = document.getElementById('chessmint-svg-layer');
+        return;
+      }
+
+      this.svgOverlay = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      this.svgOverlay.id = 'chessmint-svg-layer';
+      this.svgOverlay.style.cssText = 'position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:9999;';
+
       if (getComputedStyle(this.board).position === 'static') {
         this.board.style.position = 'relative';
       }
@@ -63,8 +257,8 @@
       marker.setAttribute('viewBox', '0 0 10 10');
       marker.setAttribute('refX', '5');
       marker.setAttribute('refY', '5');
-      marker.setAttribute('markerWidth', '4');  // Diperkecil agar proporsional
-      marker.setAttribute('markerHeight', '4'); // Diperkecil agar proporsional
+      marker.setAttribute('markerWidth', '3.5');
+      marker.setAttribute('markerHeight', '3.5');
       marker.setAttribute('orient', 'auto-start-reverse');
 
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
@@ -73,8 +267,8 @@
 
       marker.appendChild(path);
       defs.appendChild(marker);
-      svgOverlay.appendChild(defs);
-      this.board.appendChild(svgOverlay);
+      this.svgOverlay.appendChild(defs);
+      this.board.appendChild(this.svgOverlay);
     }
 
     squareToCoords(square) {
@@ -88,13 +282,8 @@
 
       const isFlipped = this.board.classList.contains('flipped');
 
-      let xIdx = file;
-      let yIdx = rank;
-
-      if (isFlipped) {
-        xIdx = 7 - file;
-        yIdx = 7 - rank;
-      }
+      let xIdx = isFlipped ? 7 - file : file;
+      let yIdx = isFlipped ? 7 - rank : rank;
 
       return {
         x: (xIdx + 0.5) * squareWidth,
@@ -103,11 +292,8 @@
     }
 
     drawArrow(fromSquare, toSquare, color = '#10b981') {
-      if (!svgOverlay || !currentOptions.show_hints) {
-        this.clearMarkings();
-        return;
-      }
       this.clearMarkings();
+      if (!this.svgOverlay || !currentOptions.show_hints) return;
 
       const start = this.squareToCoords(fromSquare);
       const end = this.squareToCoords(toSquare);
@@ -118,22 +304,22 @@
       line.setAttribute('x2', end.x);
       line.setAttribute('y2', end.y);
       line.setAttribute('stroke', color);
-      line.setAttribute('stroke-width', '4');      // Diperkecil dari 8 ke 4 agar ramping & tajam
+      line.setAttribute('stroke-width', '4');
       line.setAttribute('stroke-opacity', '0.9');
       line.setAttribute('stroke-linecap', 'round');
       line.setAttribute('marker-end', 'url(#cm-arrowhead)');
 
-      svgOverlay.appendChild(line);
-      activeMoveMarkings.push(line);
+      this.svgOverlay.appendChild(line);
+      this.activeMarkings.push(line);
     }
 
     clearMarkings() {
-      activeMoveMarkings.forEach(el => el.remove());
-      activeMoveMarkings = [];
+      this.activeMarkings.forEach(el => el.remove());
+      this.activeMarkings = [];
     }
   }
 
-  // --- Engine Otomasi Gerakan (Anti-Ban / Human Move Pro) ---
+  // --- 5. HUMAN-LIKE AUTO MOVE ENGINE ---
   class AutomaticMoveEngine {
     constructor(fromSquare, toSquare) {
       this.fromSquare = fromSquare;
@@ -150,9 +336,9 @@
 
       let delay = 1000;
       if (currentOptions.human_move_pro) {
-        delay = Math.floor(Math.random() * 2000) + 1000;
+        delay = Math.floor(Math.random() * 2000) + 1200;
       } else if (currentOptions.anti_ban) {
-        delay = Math.floor(Math.random() * 1000) + 500;
+        delay = Math.floor(Math.random() * 1000) + 600;
       }
 
       await new Promise(r => setTimeout(r, delay));
@@ -179,188 +365,190 @@
     }
   }
 
-  function init() {
-    if (observer) observer.disconnect();
+  // --- 6. UI MANAGER ---
+  class UIManager {
+    constructor(boardElement) {
+      this.board = boardElement;
+      this.depthBarProgress = null;
+      this.evalBarElement = null;
+      this.evalScoreElement = null;
+      this.evalBlackFill = null;
+      this.evalWhiteFill = null;
+      this.createComponents();
+    }
 
-    const findBoard = () => {
-      return document.querySelector('wc-chess-board') || 
-             document.querySelector('chess-board') || 
-             document.querySelector('#board-layout-chessboard');
-    };
-
-    observer = new MutationObserver(() => {
-      const board = findBoard();
-      if (board && board !== activeBoard) {
-        activeBoard = board;
-        attachToBoard(board);
+    createComponents() {
+      let parentLayout = this.board.parentElement;
+      if (!parentLayout || parentLayout === document.body || parentLayout === document.documentElement) {
+        parentLayout = this.board;
       }
-    });
+      let insertParent = parentLayout.parentNode || parentLayout;
 
-    observer.observe(document.body, { childList: true, subtree: true });
+      // 1. Depth Bar
+      if (!document.querySelector('.depthBarLayout')) {
+        const container = document.createElement('div');
+        container.className = 'depthBarLayout';
+        this.depthBarProgress = document.createElement('div');
+        this.depthBarProgress.className = 'depthBarProgress';
+        container.appendChild(this.depthBarProgress);
 
-    const existingBoard = findBoard();
-    if (existingBoard) {
-      activeBoard = existingBoard;
-      attachToBoard(existingBoard);
-    }
-  }
-
-  let boardDrawerInstance = null;
-
-  function attachToBoard(board) {
-    if (!board) return;
-    console.log('[ChessMint Pro] Attached to board and listening in real-time!');
-    createUIComponents(board);
-    boardDrawerInstance = new BoardDrawer(board);
-
-    // Tampilkan panah awal secara cepat
-    updateDynamicArrow(board);
-
-    // Memantau perubahan langkah secara real-time dengan cepat dan tajam
-    let lastState = '';
-    const boardObserver = new MutationObserver(() => {
-      const pieces = board.querySelectorAll('.piece, [data-piece], piece');
-      let currentState = Array.from(pieces).map(p => (p.getAttribute('data-square') || '') + p.className).join('');
-
-      if (currentState !== lastState) {
-        lastState = currentState;
-        handleBoardChange(board);
+        if (insertParent === parentLayout) insertParent.appendChild(container);
+        else insertParent.insertBefore(container, parentLayout.nextSibling);
+      } else {
+        this.depthBarProgress = document.querySelector('.depthBarProgress');
       }
-    });
 
-    boardObserver.observe(board, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'data-square'] });
-  }
+      // 2. Active Status Label
+      if (!document.querySelector('.cm-active-status')) {
+        const activeStatus = document.createElement('div');
+        activeStatus.className = 'cm-active-status';
+        activeStatus.innerText = '🟢 ChessMint Pro Active';
+        activeStatus.style.cssText = 'text-align: center; color: #10b981; font-weight: bold; padding: 5px; font-size: 14px;';
+        if (insertParent === parentLayout) insertParent.appendChild(activeStatus);
+        else insertParent.insertBefore(activeStatus, parentLayout.nextSibling);
+      }
 
-  // Fungsi untuk menghasilkan prediksi langkah secara responsif & dinamis
-  function updateDynamicArrow(board) {
-    if (!boardDrawerInstance) return;
+      // 3. Evaluation Bar
+      if (!document.querySelector('.cm-eval-container')) {
+        this.evalBarElement = document.createElement('div');
+        this.evalBarElement.className = 'cm-eval-container';
+        this.evalBarElement.innerHTML = `
+          <div class="cm-eval-badge dark" id="cm-eval-score">+0.0</div>
+          <div class="cm-eval-fill-black" id="cm-eval-black" style="width: 50%;"></div>
+          <div class="cm-eval-fill-white" id="cm-eval-white" style="width: 50%;"></div>
+        `;
+        if (insertParent === parentLayout) insertParent.insertBefore(this.evalBarElement, insertParent.firstChild);
+        else insertParent.insertBefore(this.evalBarElement, parentLayout);
+      } else {
+        this.evalBarElement = document.querySelector('.cm-eval-container');
+      }
 
-    // Deteksi posisi bidak secara sederhana untuk memberikan variasi panah prediksi real-time
-    const whitePawns = board.querySelectorAll('.piece.wp, [data-piece="wp"], piece.white.pawn');
-    
-    // Logika pemilihan arah panah prediktif yang cepat
-    let from = 'e2';
-    let to = 'e4';
+      this.evalScoreElement = document.getElementById('cm-eval-score');
+      this.evalBlackFill = document.getElementById('cm-eval-black');
+      this.evalWhiteFill = document.getElementById('cm-eval-white');
 
-    if (whitePawns.length < 8) {
-      from = 'g1';
-      to = 'f3';
+      this.updateVisibility();
     }
 
-    boardDrawerInstance.drawArrow(from, to, '#10b981');
-  }
-
-  function createUIComponents(board) {
-    if (!board) return;
-
-    let parentLayout = board.parentElement;
-    if (!parentLayout || parentLayout === document.body || parentLayout === document.documentElement) {
-        parentLayout = board;
+    updateVisibility() {
+      if (this.depthBarProgress && this.depthBarProgress.parentElement) {
+        this.depthBarProgress.parentElement.style.display = currentOptions.depth_bar ? 'block' : 'none';
+      }
+      if (this.evalBarElement) {
+        this.evalBarElement.style.display = currentOptions.evaluation_bar ? 'flex' : 'none';
+      }
     }
 
-    let insertParent = parentLayout.parentNode || parentLayout;
-
-    // 1. Depth Progress Bar
-    if (!document.querySelector('.depthBarLayout')) {
-      const container = document.createElement('div');
-      container.className = 'depthBarLayout';
-      depthBarProgress = document.createElement('div');
-      depthBarProgress.className = 'depthBarProgress';
-      container.appendChild(depthBarProgress);
-
-      try {
-          if (insertParent === parentLayout) insertParent.appendChild(container);
-          else insertParent.insertBefore(container, parentLayout.nextSibling);
-      } catch(e) {}
-    } else {
-        depthBarProgress = document.querySelector('.depthBarProgress');
+    updateDepthProgress(currentDepth, maxDepth) {
+      if (!this.depthBarProgress || !currentOptions.depth_bar) return;
+      const pct = Math.min(100, Math.floor((currentDepth / maxDepth) * 100));
+      this.depthBarProgress.style.width = `${pct}%`;
     }
 
-    // 2. Active Status Label
-    if (!document.querySelector('.cm-active-status')) {
-      const activeStatus = document.createElement('div');
-      activeStatus.className = 'cm-active-status';
-      activeStatus.innerText = '🟢 ChessMint Pro Active';
-      activeStatus.style.cssText = 'text-align: center; color: #10b981; font-weight: bold; padding: 5px; font-size: 14px;';
-      try {
-          if (insertParent === parentLayout) insertParent.appendChild(activeStatus);
-          else insertParent.insertBefore(activeStatus, parentLayout.nextSibling);
-      } catch(e) {}
-    }
+    updateEvaluation(scoreStr, cpValue) {
+      if (!currentOptions.evaluation_bar) return;
+      if (this.evalScoreElement) {
+        this.evalScoreElement.innerText = scoreStr;
+      }
 
-    // 3. Evaluation Bar & Score
-    if (!document.querySelector('.cm-eval-container')) {
-      evalBarElement = document.createElement('div');
-      evalBarElement.className = 'cm-eval-container';
-      evalBarElement.innerHTML = `
-        <div class="cm-eval-badge dark" id="cm-eval-score">+0.0</div>
-        <div class="cm-eval-fill-black" id="cm-eval-black" style="width: 50%;"></div>
-        <div class="cm-eval-fill-white" id="cm-eval-white" style="width: 50%;"></div>
-      `;
-      try {
-          if (insertParent === parentLayout) insertParent.insertBefore(evalBarElement, insertParent.firstChild);
-          else insertParent.insertBefore(evalBarElement, parentLayout);
-      } catch(e) {}
-    } else {
-        evalBarElement = document.querySelector('.cm-eval-container');
-    }
-
-    evalScoreElement = document.getElementById('cm-eval-score');
-    evalBlackFill = document.getElementById('cm-eval-black');
-    evalWhiteFill = document.getElementById('cm-eval-white');
-
-    updateUIState();
-  }
-
-  function updateUIState() {
-    if (depthBarProgress && depthBarProgress.parentElement) {
-      depthBarProgress.parentElement.style.display = currentOptions.depth_bar ? 'block' : 'none';
-    }
-    if (evalBarElement) {
-      evalBarElement.style.display = currentOptions.evaluation_bar ? 'flex' : 'none';
+      const whitePct = Math.min(Math.max(50 + (cpValue * 10), 10), 90);
+      if (this.evalWhiteFill && this.evalBlackFill) {
+        this.evalWhiteFill.style.width = `${whitePct}%`;
+        this.evalBlackFill.style.width = `${100 - whitePct}%`;
+      }
     }
   }
 
-  function handleBoardChange(board) {
-    // 1. Animasi Depth Bar Cepat
-    if (depthBarProgress && currentOptions.depth_bar) {
-      depthBarProgress.style.width = '0%';
-      let prog = 0;
-      const interval = setInterval(() => {
-        prog += 35;
-        if (depthBarProgress) {
-            depthBarProgress.style.width = `${Math.min(prog, 100)}%`;
+  // --- 7. MASTER CONTROLLER ---
+  class ChessMintController {
+    constructor() {
+      this.boardElement = null;
+      this.boardDrawer = null;
+      this.uiManager = null;
+      this.stockfish = new StockfishEngine();
+      this.lastFen = '';
+      this.observer = null;
+      this.boardObserver = null;
+    }
+
+    init() {
+      OptionsManager.init(() => {
+        if (this.uiManager) this.uiManager.updateVisibility();
+      });
+
+      const findAndAttach = () => {
+        const board = DOMBoardParser.getBoardElement();
+        if (board && board !== this.boardElement) {
+          this.attachToBoard(board);
         }
-        if (prog >= 100) clearInterval(interval);
-      }, 30);
+      };
+
+      this.observer = new MutationObserver(findAndAttach);
+      this.observer.observe(document.body, { childList: true, subtree: true });
+
+      findAndAttach();
     }
 
-    // 2. Pembaruan Evaluasi Real-Time
-    if (evalScoreElement) {
-      const evalVal = (Math.random() * 0.8 - 0.4).toFixed(1);
-      const formatted = evalVal >= 0 ? `+${evalVal}` : `${evalVal}`;
-      evalScoreElement.innerText = formatted;
-      
-      const whitePct = Math.min(Math.max(50 + (parseFloat(evalVal) * 15), 15), 85);
-      if (evalWhiteFill && evalBlackFill) {
-        evalWhiteFill.style.width = `${whitePct}%`;
-        evalBlackFill.style.width = `${100 - whitePct}%`;
-      }
+    attachToBoard(board) {
+      this.boardElement = board;
+      console.log('[ChessMint Pro] Attached to Chessboard!');
+
+      this.boardDrawer = new BoardDrawer(board);
+      this.uiManager = new UIManager(board);
+
+      // Memantau perubahan DOM Bidak secara Real-Time
+      if (this.boardObserver) this.boardObserver.disconnect();
+      this.boardObserver = new MutationObserver(() => this.handleBoardChange());
+      this.boardObserver.observe(board, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['class', 'style', 'data-square']
+      });
+
+      this.handleBoardChange();
     }
 
-    // 3. Perbarui Posisi Panah secara Real-Time & Cepat
-    updateDynamicArrow(board);
+    handleBoardChange() {
+      const currentFen = DOMBoardParser.parseFen(this.boardElement);
+      if (!currentFen || currentFen === this.lastFen) return;
 
-    // 4. Jalankan Auto Move jika aktif
-    if (currentOptions.auto_move) {
-      const autoMove = new AutomaticMoveEngine('g1', 'f3');
-      autoMove.execute();
+      // 1. LANGSUNG HAPUS PANAH LAMA
+      this.boardDrawer.clearMarkings();
+      this.lastFen = currentFen;
+
+      // 2. JALANKAN STOCKFISH UNTUK FEN TERBARU
+      this.stockfish.analyze(currentFen, currentOptions.depth, (data) => {
+        if (data.type === 'info') {
+          this.uiManager.updateDepthProgress(data.depth, currentOptions.depth);
+          this.uiManager.updateEvaluation(data.score, data.cpValue);
+
+          // Update panah sementara dari PV (Principal Variation) saat kalkulasi berjalan
+          if (data.predictedMove && data.predictedMove.length === 4) {
+            const from = data.predictedMove.substring(0, 2);
+            const to = data.predictedMove.substring(2, 4);
+            this.boardDrawer.drawArrow(from, to);
+          }
+        }
+
+        if (data.type === 'bestmove') {
+          this.boardDrawer.drawArrow(data.from, data.to);
+
+          // Jika Auto Move Aktif, eksekusi gerakan terbaik
+          if (currentOptions.auto_move) {
+            const autoMove = new AutomaticMoveEngine(data.from, data.to);
+            autoMove.execute();
+          }
+        }
+      });
     }
   }
 
+  // --- INITIALIZATION ---
+  const app = new ChessMintController();
   if (document.readyState === 'complete' || document.readyState === 'interactive') {
-    init();
+    app.init();
   } else {
-    document.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('DOMContentLoaded', () => app.init());
   }
 })();
