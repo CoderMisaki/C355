@@ -2,8 +2,11 @@
   "manifest_version": 3,
   "name": "ChessMint Pro",
   "short_name": "ChessMint",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "description": "Advanced Real-time Chess Engine Assistant",
+  "background": {
+    "service_worker": "background.js"
+  },
   "content_scripts": [
     {
       "matches": ["*://*.chess.com/*"],
