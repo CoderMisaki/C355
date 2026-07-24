@@ -8,7 +8,9 @@
     move_analysis: true,
     depth_bar: true,
     evaluation_bar: true,
-    auto_move: false
+    auto_move: false,
+    anti_ban: true,
+    human_move_pro: true
   };
 
   function injectScript(file) {

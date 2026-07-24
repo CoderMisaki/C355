@@ -5,7 +5,9 @@ const defaultOptions = {
   move_analysis: true,
   depth_bar: true,
   evaluation_bar: true,
-  auto_move: false
+  auto_move: false,
+  anti_ban: true,
+  human_move_pro: true
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -15,6 +17,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const depthBarInput = document.getElementById('option-depth-bar');
   const evalBarInput = document.getElementById('option-evaluation-bar');
   const autoMoveInput = document.getElementById('option-auto-move');
+  const antiBanInput = document.getElementById('option-anti-ban');
+  const humanMoveProInput = document.getElementById('option-human-move-pro');
 
   function loadOptions() {
     if (chrome && chrome.storage && chrome.storage.sync) {
@@ -25,6 +29,8 @@ document.addEventListener('DOMContentLoaded', () => {
         depthBarInput.checked = opts.depth_bar;
         evalBarInput.checked = opts.evaluation_bar;
         autoMoveInput.checked = opts.auto_move;
+        antiBanInput.checked = opts.anti_ban !== undefined ? opts.anti_ban : true;
+        humanMoveProInput.checked = opts.human_move_pro !== undefined ? opts.human_move_pro : true;
       });
     }
   }
@@ -37,7 +43,9 @@ document.addEventListener('DOMContentLoaded', () => {
       move_analysis: true,
       depth_bar: depthBarInput.checked,
       evaluation_bar: evalBarInput.checked,
-      auto_move: autoMoveInput.checked
+      auto_move: autoMoveInput.checked,
+      anti_ban: antiBanInput.checked,
+      human_move_pro: humanMoveProInput.checked
     };
 
     depthVal.textContent = opts.depth;
@@ -58,6 +66,8 @@ document.addEventListener('DOMContentLoaded', () => {
   depthBarInput.addEventListener('change', saveOptions);
   evalBarInput.addEventListener('change', saveOptions);
   autoMoveInput.addEventListener('change', saveOptions);
+  antiBanInput.addEventListener('change', saveOptions);
+  humanMoveProInput.addEventListener('change', saveOptions);
 
   loadOptions();
 });

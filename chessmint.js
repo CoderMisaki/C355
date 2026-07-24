@@ -8,7 +8,9 @@
     move_analysis: true,
     depth_bar: true,
     evaluation_bar: true,
-    auto_move: false
+    auto_move: false,
+    anti_ban: true,
+    human_move_pro: true
   };
 
   let activeBoard = null;
@@ -55,20 +57,29 @@
     console.log('[ChessMint] Attached to board!');
     createUIComponents(board);
 
-    const game = board.game || board.controller || (board.getGame && board.getGame());
+    let retryCount = 0;
+    const tryHookGame = () => {
+      const game = board.game || board.controller || (board.getGame && board.getGame());
 
-    if (game && typeof game.on === 'function') {
-      try {
-        game.on('Move', () => {
-          handleMove(game);
-        });
-        console.log('[ChessMint] Event Move Listener Ready.');
-      } catch(e) {
-          console.warn('[ChessMint] Error hooking move event:', e);
+      if (game && typeof game.on === 'function') {
+        try {
+          game.on('Move', () => {
+            handleMove(game);
+          });
+          console.log('[ChessMint] Event Move Listener Ready.');
+        } catch(e) {
+            console.warn('[ChessMint] Error hooking move event:', e);
+        }
+      } else {
+          if (retryCount < 10) {
+              retryCount++;
+              setTimeout(tryHookGame, 500);
+          } else {
+              console.warn('[ChessMint] game object not found on board element after retries.');
+          }
       }
-    } else {
-        console.warn('[ChessMint] game object not found on board element.');
-    }
+    };
+    tryHookGame();
   }
 
   function createUIComponents(board) {
@@ -101,6 +112,22 @@
       }
     } else {
         depthBarProgress = document.querySelector('.depthBarProgress');
+    }
+
+    if (!document.querySelector('.cm-active-status')) {
+      const activeStatus = document.createElement('div');
+      activeStatus.className = 'cm-active-status';
+      activeStatus.innerText = '🟢 Extension Active';
+      activeStatus.style.cssText = 'text-align: center; color: #10b981; font-weight: bold; padding: 5px; font-size: 14px;';
+      try {
+          if(insertParent === parentLayout) {
+             insertParent.appendChild(activeStatus);
+          } else {
+             insertParent.insertBefore(activeStatus, parentLayout.nextSibling);
+          }
+      } catch(e) {
+          console.warn('[ChessMint] Failed to insert active status', e);
+      }
     }
 
     if (!document.querySelector('.cm-eval-container')) {
@@ -150,6 +177,14 @@
     }
 
     if (currentOptions.auto_move && game) {
+      let delay = 600;
+      if (currentOptions.human_move_pro) {
+          // Human-like delay between 1.5s and 4s
+          delay = Math.floor(Math.random() * 2500) + 1500;
+      } else if (currentOptions.anti_ban) {
+          // Anti-ban delay between 0.8s and 2s
+          delay = Math.floor(Math.random() * 1200) + 800;
+      }
       setTimeout(() => {
         try {
             if (typeof game.getLegalMoves === 'function') {
@@ -165,7 +200,7 @@
         } catch(e) {
             console.warn('[ChessMint] Auto-move failed:', e);
         }
-      }, 600);
+      }, delay);
     }
   }
 
