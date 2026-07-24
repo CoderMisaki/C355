@@ -122,8 +122,14 @@
         observer.disconnect();
     }
 
+    const findBoard = () => {
+      return document.querySelector('wc-chess-board') || 
+             document.querySelector('chess-board') || 
+             document.querySelector('#board-layout-chessboard');
+    };
+
     observer = new MutationObserver(() => {
-      const board = document.querySelector('chess-board');
+      const board = findBoard();
       if (board && board !== activeBoard) {
         activeBoard = board;
         attachToBoard(board);
@@ -132,7 +138,7 @@
 
     observer.observe(document.body, { childList: true, subtree: true });
 
-    const existingBoard = document.querySelector('chess-board');
+    const existingBoard = findBoard();
     if (existingBoard) {
       activeBoard = existingBoard;
       attachToBoard(existingBoard);
