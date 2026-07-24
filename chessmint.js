@@ -50,10 +50,8 @@
 
     initEngine() {
       try {
-        // Memuat Stockfish Worker (Menggunakan CDN Fallback jika lokal belum ada)
-        const stockfishUrl = typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL
-          ? chrome.runtime.getURL('stockfish.js')
-          : 'https://cdnjs.cloudflare.com/ajax/libs/stockfish.js/10.0.2/stockfish.js';
+        // Memuat Stockfish Worker lokal secara eksplisit
+        const stockfishUrl = chrome.runtime.getURL('stockfish.js');
 
         // Inisialisasi Worker dari Blob agar aman dari pembatasan CSP extension
         const workerScript = `importScripts('${stockfishUrl}');`;
@@ -64,9 +62,9 @@
         this.sendCommand('uci');
         this.sendCommand('isready');
       } catch (e) {
-        console.warn('[ChessMint] WebWorker Stockfish failed, using fallback Worker loader:', e);
-        // Direct Fallback Worker
-        this.worker = new Worker('https://cdnjs.cloudflare.com/ajax/libs/stockfish.js/10.0.2/stockfish.js');
+        console.warn('[ChessMint] WebWorker lokal gagal, mencoba direct load:', e);
+        // Fallback langsung ke lokal (TIDAK MENGGUNAKAN CDN karena akan diblokir MV3)
+        this.worker = new Worker(chrome.runtime.getURL('stockfish.js'));
         this.worker.onmessage = (event) => this.handleEngineMessage(event.data);
       }
     }
