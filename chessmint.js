@@ -86,10 +86,17 @@
     }
   }
 
-  // --- 2. BOARD PARSER (ANTI-BUG GILIRAN) ---
+  // --- 2. BOARD PARSER (ENHANCED DOM SELECTOR) ---
   class DOMBoardParser {
     static getBoard() {
-      return document.querySelector('wc-chess-board') || document.querySelector('chess-board') || document.querySelector('#board-layout-chessboard');
+      return (
+        document.querySelector('wc-chess-board') ||
+        document.querySelector('chess-board') ||
+        document.querySelector('#board-single') ||
+        document.querySelector('#board-layout-chessboard') ||
+        document.querySelector('.board') ||
+        document.querySelector('[class*="board-board"]')
+      );
     }
 
     static parseFen(boardElement) {
@@ -127,7 +134,6 @@
         fenRows.push(row);
       }
 
-      // TRIK RAHASIA: Selalu analisis berdasarkan warna kita sendiri (Anti-Bug Lawan Bot)
       const myColor = boardElement.classList.contains('flipped') ? 'b' : 'w';
       return `${fenRows.join('/')} ${myColor} KQkq - 0 1`;
     }
@@ -202,7 +208,7 @@
     }
   }
 
-  // --- 5. IN-PAGE UI MANAGER ---
+  // --- 5. IN-PAGE UI MANAGER (ROBUST INJECTION) ---
   class UIManager {
     constructor(board) {
       this.board = board;
@@ -210,73 +216,74 @@
       this.initUI();
     }
     initUI() {
-      let parent = this.board.parentElement;
-      if (!parent || parent === document.body) parent = this.board;
-      let target = parent.parentNode || parent;
+      if (document.getElementById('cm-hud-wrapper')) return;
 
-      if (!document.getElementById('cm-hud-wrapper')) {
-        const wrapper = document.createElement('div');
-        wrapper.id = 'cm-hud-wrapper';
-        wrapper.style.cssText = 'width: 100%; margin-top: 10px; font-family: sans-serif; user-select: none;';
+      const wrapper = document.createElement('div');
+      wrapper.id = 'cm-hud-wrapper';
+      wrapper.style.cssText = 'width: 90%; max-width: 500px; margin: 10px auto; font-family: sans-serif; user-select: none; z-index: 99999; position: relative;';
 
-        // Eval Bar
-        const evalBox = document.createElement('div');
-        evalBox.style.cssText = 'display: flex; height: 12px; width: 100%; border-radius: 4px; overflow: hidden; background: #1e293b; margin-bottom: 8px; position: relative;';
-        evalBox.innerHTML = `
-          <div style="position:absolute; right:5px; top:-2px; font-size:11px; font-weight:bold; color:#10b981; z-index:10;" id="cm-sc">+0.0</div>
-          <div id="cm-eb" style="background:#0f172a; width:50%; transition:width 0.3s;"></div>
-          <div id="cm-ew" style="background:#f8fafc; width:50%; transition:width 0.3s;"></div>`;
-        wrapper.appendChild(evalBox);
+      // Eval Bar
+      const evalBox = document.createElement('div');
+      evalBox.style.cssText = 'display: flex; height: 12px; width: 100%; border-radius: 4px; overflow: hidden; background: #1e293b; margin-bottom: 8px; position: relative;';
+      evalBox.innerHTML = `
+        <div style="position:absolute; right:5px; top:-2px; font-size:11px; font-weight:bold; color:#10b981; z-index:10;" id="cm-sc">+0.0</div>
+        <div id="cm-eb" style="background:#0f172a; width:50%; transition:width 0.3s;"></div>
+        <div id="cm-ew" style="background:#f8fafc; width:50%; transition:width 0.3s;"></div>`;
+      wrapper.appendChild(evalBox);
 
-        // Tombol Toggle Aktif
-        const btn = document.createElement('div');
-        btn.style.cssText = 'background: #262421; color: #10b981; text-align: center; padding: 12px; border-radius: 6px; font-weight: bold; cursor: pointer; border: 1px solid #10b981;';
-        btn.innerHTML = `🟢 ChessMint Pro Active <span style="font-size: 11px; color: #aaa; font-weight: normal; margin-left: 5px;">(Tap to Open Menu)</span>`;
+      // Tombol Toggle Aktif
+      const btn = document.createElement('div');
+      btn.style.cssText = 'background: #262421; color: #10b981; text-align: center; padding: 12px; border-radius: 6px; font-weight: bold; cursor: pointer; border: 1px solid #10b981; box-shadow: 0 4px 6px rgba(0,0,0,0.3);';
+      btn.innerHTML = `🟢 ChessMint Pro Active <span style="font-size: 11px; color: #aaa; font-weight: normal; margin-left: 5px;">(Tap to Open Menu)</span>`;
 
-        // Menu Dropdown Dalam Papan
-        const menu = document.createElement('div');
-        menu.style.cssText = 'display: none; background: #262421; padding: 15px; border-radius: 6px; border: 1px solid #444; margin-top: 5px; color: #fff; font-size: 14px;';
-        
-        menu.innerHTML = `
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-            <span>🧠 Engine Depth</span>
-            <div style="display:flex; align-items:center; gap:10px;">
-              <input type="range" id="cm-m-depth" min="1" max="25" value="${currentOptions.depth}" style="width: 80px; accent-color:#10b981;">
-              <span id="cm-m-dval" style="color:#10b981; font-weight:bold; width:20px;">${currentOptions.depth}</span>
-            </div>
+      // Menu Dropdown Dalam Papan
+      const menu = document.createElement('div');
+      menu.style.cssText = 'display: none; background: #262421; padding: 15px; border-radius: 6px; border: 1px solid #444; margin-top: 5px; color: #fff; font-size: 14px;';
+      
+      menu.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <span>🧠 Engine Depth</span>
+          <div style="display:flex; align-items:center; gap:10px;">
+            <input type="range" id="cm-m-depth" min="1" max="25" value="${currentOptions.depth}" style="width: 80px; accent-color:#10b981;">
+            <span id="cm-m-dval" style="color:#10b981; font-weight:bold; width:20px;">${currentOptions.depth}</span>
           </div>
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-            <span>🎯 Show Arrows</span>
-            <input type="checkbox" id="cm-m-hints" ${currentOptions.show_hints ? 'checked' : ''} style="width:18px; height:18px; accent-color: #10b981;">
-          </div>
-          <div style="display: flex; justify-content: space-between; align-items: center;">
-            <span>🤖 Auto Move</span>
-            <input type="checkbox" id="cm-m-auto" ${currentOptions.auto_move ? 'checked' : ''} style="width:18px; height:18px; accent-color: #10b981;">
-          </div>
-        `;
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <span>🎯 Show Arrows</span>
+          <input type="checkbox" id="cm-m-hints" ${currentOptions.show_hints ? 'checked' : ''} style="width:18px; height:18px; accent-color: #10b981;">
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span>🤖 Auto Move</span>
+          <input type="checkbox" id="cm-m-auto" ${currentOptions.auto_move ? 'checked' : ''} style="width:18px; height:18px; accent-color: #10b981;">
+        </div>
+      `;
 
-        btn.onclick = () => { menu.style.display = menu.style.display === 'none' ? 'block' : 'none'; };
+      btn.onclick = () => { menu.style.display = menu.style.display === 'none' ? 'block' : 'none'; };
 
-        wrapper.appendChild(btn); wrapper.appendChild(menu);
-        if (target === parent) target.appendChild(wrapper); else target.insertBefore(wrapper, parent.nextSibling);
+      wrapper.appendChild(btn); 
+      wrapper.appendChild(menu);
 
-        // Bind Data
-        this.evalScore = document.getElementById('cm-sc');
-        this.evalB = document.getElementById('cm-eb');
-        this.evalW = document.getElementById('cm-ew');
-
-        document.getElementById('cm-m-depth').oninput = (e) => { 
-          currentOptions.depth = e.target.value; 
-          document.getElementById('cm-m-dval').innerText = e.target.value; 
-        };
-        document.getElementById('cm-m-hints').onchange = (e) => currentOptions.show_hints = e.target.checked;
-        document.getElementById('cm-m-auto').onchange = (e) => currentOptions.auto_move = e.target.checked;
+      // Tempelkan UI tepat di bawah kontainer papan catur
+      const targetContainer = this.board.closest('#board-layout-chessboard') || this.board.parentElement;
+      if (targetContainer && targetContainer.parentNode) {
+        targetContainer.parentNode.insertBefore(wrapper, targetContainer.nextSibling);
       } else {
-        this.evalScore = document.getElementById('cm-sc');
-        this.evalB = document.getElementById('cm-eb');
-        this.evalW = document.getElementById('cm-ew');
+        document.body.appendChild(wrapper);
       }
+
+      // Bind Data
+      this.evalScore = document.getElementById('cm-sc');
+      this.evalB = document.getElementById('cm-eb');
+      this.evalW = document.getElementById('cm-ew');
+
+      document.getElementById('cm-m-depth').oninput = (e) => { 
+        currentOptions.depth = e.target.value; 
+        document.getElementById('cm-m-dval').innerText = e.target.value; 
+      };
+      document.getElementById('cm-m-hints').onchange = (e) => currentOptions.show_hints = e.target.checked;
+      document.getElementById('cm-m-auto').onchange = (e) => currentOptions.auto_move = e.target.checked;
     }
+
     updateEval(scoreStr, cpValue) {
       if (this.evalScore) this.evalScore.innerText = scoreStr;
       const wPct = Math.min(Math.max(50 + (cpValue * 10), 5), 95);
