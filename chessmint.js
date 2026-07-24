@@ -48,24 +48,28 @@
       this.initEngine();
     }
 
-    initEngine() {
+    async initEngine() {
       try {
-        // Memuat Stockfish Worker lokal secara eksplisit
+        // Metode Aman MV3: Mengambil file lokal sebagai teks, lalu jadikan Blob Worker
         const stockfishUrl = chrome.runtime.getURL('stockfish.js');
+        console.log('[ChessMint Pro] Fetching Stockfish dari lokal...');
+        
+        const response = await fetch(stockfishUrl);
+        const scriptText = await response.text();
 
-        // Inisialisasi Worker dari Blob agar aman dari pembatasan CSP extension
-        const workerScript = `importScripts('${stockfishUrl}');`;
-        const blob = new Blob([workerScript], { type: 'application/javascript' });
-        this.worker = new Worker(URL.createObjectURL(blob));
+        // Jadikan teks murni sebagai Blob (Bypass CSP importScripts)
+        const blob = new Blob([scriptText], { type: 'application/javascript' });
+        const blobUrl = URL.createObjectURL(blob);
+
+        this.worker = new Worker(blobUrl);
 
         this.worker.onmessage = (event) => this.handleEngineMessage(event.data);
         this.sendCommand('uci');
         this.sendCommand('isready');
+        console.log('[ChessMint Pro] Stockfish WebWorker berhasil dijalankan!');
+
       } catch (e) {
-        console.warn('[ChessMint] WebWorker lokal gagal, mencoba direct load:', e);
-        // Fallback langsung ke lokal (TIDAK MENGGUNAKAN CDN karena akan diblokir MV3)
-        this.worker = new Worker(chrome.runtime.getURL('stockfish.js'));
-        this.worker.onmessage = (event) => this.handleEngineMessage(event.data);
+        console.error('[ChessMint Pro] WebWorker gagal dimuat:', e);
       }
     }
 
@@ -208,18 +212,14 @@
         fenRows.push(rowStr);
       }
 
-      // Deteksi giliran melangkah (Turn detection)
       const turn = DOMBoardParser.detectActiveTurn(boardElement);
-
       return `${fenRows.join('/')} ${turn} KQkq - 0 1`;
     }
 
     static detectActiveTurn(boardElement) {
-      // Papan dibalik = Hitam (Black), standar = Putih (White)
       const isFlipped = boardElement.classList.contains('flipped');
       const highlights = boardElement.querySelectorAll('.highlight');
       if (highlights.length >= 2) {
-        // Jika ada highlight gerakan terakhir, tentukan giliran dari elemen aktif
         return isFlipped ? 'b' : 'w';
       }
       return 'w';
@@ -382,7 +382,6 @@
       }
       let insertParent = parentLayout.parentNode || parentLayout;
 
-      // 1. Depth Bar
       if (!document.querySelector('.depthBarLayout')) {
         const container = document.createElement('div');
         container.className = 'depthBarLayout';
@@ -396,7 +395,6 @@
         this.depthBarProgress = document.querySelector('.depthBarProgress');
       }
 
-      // 2. Active Status Label
       if (!document.querySelector('.cm-active-status')) {
         const activeStatus = document.createElement('div');
         activeStatus.className = 'cm-active-status';
@@ -406,7 +404,6 @@
         else insertParent.insertBefore(activeStatus, parentLayout.nextSibling);
       }
 
-      // 3. Evaluation Bar
       if (!document.querySelector('.cm-eval-container')) {
         this.evalBarElement = document.createElement('div');
         this.evalBarElement.className = 'cm-eval-container';
@@ -494,7 +491,6 @@
       this.boardDrawer = new BoardDrawer(board);
       this.uiManager = new UIManager(board);
 
-      // Memantau perubahan DOM Bidak secara Real-Time
       if (this.boardObserver) this.boardObserver.disconnect();
       this.boardObserver = new MutationObserver(() => this.handleBoardChange());
       this.boardObserver.observe(board, {
@@ -511,17 +507,14 @@
       const currentFen = DOMBoardParser.parseFen(this.boardElement);
       if (!currentFen || currentFen === this.lastFen) return;
 
-      // 1. LANGSUNG HAPUS PANAH LAMA
       this.boardDrawer.clearMarkings();
       this.lastFen = currentFen;
 
-      // 2. JALANKAN STOCKFISH UNTUK FEN TERBARU
       this.stockfish.analyze(currentFen, currentOptions.depth, (data) => {
         if (data.type === 'info') {
           this.uiManager.updateDepthProgress(data.depth, currentOptions.depth);
           this.uiManager.updateEvaluation(data.score, data.cpValue);
 
-          // Update panah sementara dari PV (Principal Variation) saat kalkulasi berjalan
           if (data.predictedMove && data.predictedMove.length === 4) {
             const from = data.predictedMove.substring(0, 2);
             const to = data.predictedMove.substring(2, 4);
@@ -532,7 +525,6 @@
         if (data.type === 'bestmove') {
           this.boardDrawer.drawArrow(data.from, data.to);
 
-          // Jika Auto Move Aktif, eksekusi gerakan terbaik
           if (currentOptions.auto_move) {
             const autoMove = new AutomaticMoveEngine(data.from, data.to);
             autoMove.execute();
