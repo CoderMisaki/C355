@@ -11,27 +11,41 @@
     auto_move: false
   };
 
-  // 1. Suntikkan chessmint.js ke Main World halaman web
   function injectScript(file) {
-    const script = document.createElement('script');
-    script.src = chrome.runtime.getURL(file);
-    (document.head || document.documentElement).appendChild(script);
-    script.onload = () => script.remove();
+    try {
+      const script = document.createElement('script');
+      script.src = chrome.runtime.getURL(file);
+      script.onload = function() {
+        this.remove();
+      };
+      (document.head || document.documentElement).appendChild(script);
+    } catch (e) {
+      console.error('[ChessMint] Failed to inject script:', e);
+    }
   }
 
-  // 2. Kirim data opsi dari storage ke script halaman web
   window.addEventListener('ChessMintGetOptions', () => {
-    chrome.storage.sync.get(defaultOptions, (opts) => {
-      window.dispatchEvent(new CustomEvent('ChessMintSendOptions', { detail: opts }));
-    });
-  });
-
-  // 3. Teruskan update live dari popup ke halaman web
-  chrome.runtime.onMessage.addListener((request) => {
-    if (request.type === 'UpdateOptions') {
-      window.dispatchEvent(new CustomEvent('ChessMintUpdateOptions', { detail: request.data }));
+    try {
+      if (chrome && chrome.storage && chrome.storage.sync) {
+        chrome.storage.sync.get(defaultOptions, (opts) => {
+          window.dispatchEvent(new CustomEvent('ChessMintSendOptions', { detail: opts }));
+        });
+      } else {
+        window.dispatchEvent(new CustomEvent('ChessMintSendOptions', { detail: defaultOptions }));
+      }
+    } catch (e) {
+      console.error('[ChessMint] Error accessing chrome.storage:', e);
+      window.dispatchEvent(new CustomEvent('ChessMintSendOptions', { detail: defaultOptions }));
     }
   });
+
+  if (chrome && chrome.runtime && chrome.runtime.onMessage) {
+    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+      if (request.type === 'UpdateOptions') {
+        window.dispatchEvent(new CustomEvent('ChessMintUpdateOptions', { detail: request.data }));
+      }
+    });
+  }
 
   injectScript('chessmint.js');
 })();

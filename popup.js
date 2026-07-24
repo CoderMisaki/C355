@@ -17,14 +17,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const autoMoveInput = document.getElementById('option-auto-move');
 
   function loadOptions() {
-    chrome.storage.sync.get(defaultOptions, (opts) => {
-      depthInput.value = opts.depth;
-      depthVal.textContent = opts.depth;
-      hintsInput.checked = opts.show_hints;
-      depthBarInput.checked = opts.depth_bar;
-      evalBarInput.checked = opts.evaluation_bar;
-      autoMoveInput.checked = opts.auto_move;
-    });
+    if (chrome && chrome.storage && chrome.storage.sync) {
+      chrome.storage.sync.get(defaultOptions, (opts) => {
+        depthInput.value = opts.depth;
+        depthVal.textContent = opts.depth;
+        hintsInput.checked = opts.show_hints;
+        depthBarInput.checked = opts.depth_bar;
+        evalBarInput.checked = opts.evaluation_bar;
+        autoMoveInput.checked = opts.auto_move;
+      });
+    }
   }
 
   function saveOptions() {
@@ -40,13 +42,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     depthVal.textContent = opts.depth;
 
-    chrome.storage.sync.set(opts, () => {
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (tabs[0]?.id) {
-          chrome.tabs.sendMessage(tabs[0].id, { type: 'UpdateOptions', data: opts }).catch(() => {});
-        }
+    if (chrome && chrome.storage && chrome.storage.sync) {
+      chrome.storage.sync.set(opts, () => {
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+          if (tabs && tabs.length > 0 && tabs[0].id) {
+            chrome.tabs.sendMessage(tabs[0].id, { type: 'UpdateOptions', data: opts }).catch(() => {});
+          }
+        });
       });
-    });
+    }
   }
 
   depthInput.addEventListener('input', saveOptions);
