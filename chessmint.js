@@ -48,26 +48,33 @@
       this.initEngine();
     }
 
-    async initEngine() {
+    initEngine() {
       try {
-        // Metode Aman MV3: Mengambil file lokal sebagai teks, lalu jadikan Blob Worker
-        const stockfishUrl = chrome.runtime.getURL('stockfish.js');
-        console.log('[ChessMint Pro] Fetching Stockfish dari lokal...');
+        console.log('[ChessMint Pro] Meminta kode Stockfish dari Background Script untuk bypass CSP...');
         
-        const response = await fetch(stockfishUrl);
-        const scriptText = await response.text();
-
-        // Jadikan teks murni sebagai Blob (Bypass CSP importScripts)
-        const blob = new Blob([scriptText], { type: 'application/javascript' });
-        const blobUrl = URL.createObjectURL(blob);
-
-        this.worker = new Worker(blobUrl);
-
-        this.worker.onmessage = (event) => this.handleEngineMessage(event.data);
-        this.sendCommand('uci');
-        this.sendCommand('isready');
-        console.log('[ChessMint Pro] Stockfish WebWorker berhasil dijalankan!');
-
+        chrome.runtime.sendMessage({ action: 'get_stockfish' }, (response) => {
+          if (chrome.runtime.lastError) {
+             console.error('[ChessMint Pro] Error komunikasi:', chrome.runtime.lastError);
+             return;
+          }
+          if (response && response.code) {
+            try {
+              // Merakit teks kode menjadi Blob murni untuk melewati sensor CSP
+              const blob = new Blob([response.code], { type: 'application/javascript' });
+              const blobUrl = URL.createObjectURL(blob);
+              
+              this.worker = new Worker(blobUrl);
+              this.worker.onmessage = (event) => this.handleEngineMessage(event.data);
+              this.sendCommand('uci');
+              this.sendCommand('isready');
+              console.log('[ChessMint Pro] Stockfish WebWorker berhasil diinjeksi dengan aman!');
+            } catch (workerError) {
+              console.error('[ChessMint Pro] Gagal membuat Worker dari Blob:', workerError);
+            }
+          } else {
+            console.error('[ChessMint Pro] Gagal mendapatkan Stockfish dari background:', response?.error);
+          }
+        });
       } catch (e) {
         console.error('[ChessMint Pro] WebWorker gagal dimuat:', e);
       }
