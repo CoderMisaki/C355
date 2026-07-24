@@ -2,20 +2,14 @@
   "manifest_version": 3,
   "name": "ChessMint",
   "short_name": "ChessMint",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "Advanced Chess Assistant Extension",
   "content_scripts": [
     {
       "matches": ["https://www.chess.com/*"],
-      "js": ["loader.js"],
+      "js": ["chessmint.js"],
       "css": ["styles.css"],
       "run_at": "document_end"
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": ["chessmint.js"],
-      "matches": ["https://www.chess.com/*"]
     }
   ],
   "action": {
