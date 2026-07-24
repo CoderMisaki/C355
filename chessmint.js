@@ -1,5 +1,5 @@
 /**
- * 🚀 ChessMint Pro - Stockfish Engine Integrated Assistant
+ * 🚀 ChessMint Pro - Stockfish Engine Integrated Assistant v3.3.0
  */
 
 (function () {
@@ -50,33 +50,50 @@
 
     initEngine() {
       try {
-        console.log('[ChessMint Pro] Meminta kode Stockfish dari Background Script untuk bypass CSP...');
+        console.log('[ChessMint Pro] Meminta kode Stockfish untuk bypass CSP...');
         
-        chrome.runtime.sendMessage({ action: 'get_stockfish' }, (response) => {
-          if (chrome.runtime.lastError) {
-             console.error('[ChessMint Pro] Error komunikasi:', chrome.runtime.lastError);
-             return;
-          }
-          if (response && response.code) {
-            try {
-              // Merakit teks kode menjadi Blob murni untuk melewati sensor CSP
-              const blob = new Blob([response.code], { type: 'application/javascript' });
-              const blobUrl = URL.createObjectURL(blob);
-              
-              this.worker = new Worker(blobUrl);
-              this.worker.onmessage = (event) => this.handleEngineMessage(event.data);
-              this.sendCommand('uci');
-              this.sendCommand('isready');
-              console.log('[ChessMint Pro] Stockfish WebWorker berhasil diinjeksi dengan aman!');
-            } catch (workerError) {
-              console.error('[ChessMint Pro] Gagal membuat Worker dari Blob:', workerError);
+        // Coba metode aman pertama (Background Service Worker)
+        if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+          chrome.runtime.sendMessage({ action: 'get_stockfish' }, (response) => {
+            if (chrome.runtime.lastError || !response || !response.code) {
+              console.warn('[ChessMint Pro] Background fetch gagal. Mencoba metode Inline Fallback...');
+              this.initFallbackWorker();
+              return;
             }
-          } else {
-            console.error('[ChessMint Pro] Gagal mendapatkan Stockfish dari background:', response?.error);
-          }
-        });
+            this.createWorkerFromBlob(response.code);
+          });
+        } else {
+          this.initFallbackWorker();
+        }
       } catch (e) {
         console.error('[ChessMint Pro] WebWorker gagal dimuat:', e);
+      }
+    }
+
+    // Fallback jika background script gagal merespon (misal di-suspend browser)
+    async initFallbackWorker() {
+      try {
+        const stockfishUrl = chrome.runtime.getURL('stockfish.js');
+        const response = await fetch(stockfishUrl);
+        const scriptText = await response.text();
+        this.createWorkerFromBlob(scriptText);
+      } catch(err) {
+         console.error('[ChessMint Pro] Fallback fetch lokal gagal. Pastikan file stockfish.js valid.', err);
+      }
+    }
+
+    createWorkerFromBlob(codeString) {
+      try {
+        const blob = new Blob([codeString], { type: 'application/javascript' });
+        const blobUrl = URL.createObjectURL(blob);
+        
+        this.worker = new Worker(blobUrl);
+        this.worker.onmessage = (event) => this.handleEngineMessage(event.data);
+        this.sendCommand('uci');
+        this.sendCommand('isready');
+        console.log('✅ [ChessMint Pro] Stockfish Engine BERHASIL diinjeksi!');
+      } catch (workerError) {
+        console.error('❌ [ChessMint Pro] Gagal membuat Worker dari Blob:', workerError);
       }
     }
 
@@ -268,7 +285,7 @@
 
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       path.setAttribute('d', 'M 0 2 L 10 5 L 0 8 z');
-      path.setAttribute('fill', '#10b981');
+      path.setAttribute('fill', '#10b981'); // Warna panah prediksi
 
       marker.appendChild(path);
       defs.appendChild(marker);
@@ -402,13 +419,53 @@
         this.depthBarProgress = document.querySelector('.depthBarProgress');
       }
 
+      // --- MENU ON PAGE ---
       if (!document.querySelector('.cm-active-status')) {
+        // Container Status Aktif
         const activeStatus = document.createElement('div');
         activeStatus.className = 'cm-active-status';
-        activeStatus.innerText = '🟢 ChessMint Pro Active';
-        activeStatus.style.cssText = 'text-align: center; color: #10b981; font-weight: bold; padding: 5px; font-size: 14px;';
-        if (insertParent === parentLayout) insertParent.appendChild(activeStatus);
-        else insertParent.insertBefore(activeStatus, parentLayout.nextSibling);
+        activeStatus.style.cssText = 'text-align: center; color: #10b981; font-weight: bold; padding: 5px; font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; user-select: none; background: rgba(0,0,0,0.2); border-radius: 5px; margin-top: 5px;';
+        activeStatus.innerHTML = `<span>🟢 ChessMint Pro Active</span> <span style="font-size: 10px; color: #aaa;">(Tap)</span>`;
+        
+        // Panel Menu Tersembunyi (Akan terbuka jika ditekan)
+        const inPageMenu = document.createElement('div');
+        inPageMenu.id = 'cm-inpage-menu';
+        inPageMenu.style.cssText = 'display: none; background: #1a1a2e; padding: 10px; border-radius: 8px; border: 1px solid #10b981; margin-top: 8px; color: #fff; font-size: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.5);';
+        
+        // 2 Menu Utama
+        inPageMenu.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding-bottom: 5px; border-bottom: 1px solid #333;">
+            <span>Show Hints (Arrow)</span>
+            <input type="checkbox" id="cm-toggle-hints" ${currentOptions.show_hints ? 'checked' : ''} style="width:16px; height:16px; accent-color: #10b981;">
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span>Auto Move Engine</span>
+            <input type="checkbox" id="cm-toggle-auto" ${currentOptions.auto_move ? 'checked' : ''} style="width:16px; height:16px; accent-color: #10b981;">
+          </div>
+        `;
+
+        // Logika Toggle Klik
+        activeStatus.addEventListener('click', () => {
+          inPageMenu.style.display = inPageMenu.style.display === 'none' ? 'block' : 'none';
+        });
+
+        // Insert ke Papan
+        if (insertParent === parentLayout) {
+           insertParent.appendChild(activeStatus);
+           insertParent.appendChild(inPageMenu);
+        } else {
+           insertParent.insertBefore(inPageMenu, parentLayout.nextSibling);
+           insertParent.insertBefore(activeStatus, inPageMenu);
+        }
+
+        // Listener untuk checkbox menu
+        document.getElementById('cm-toggle-hints').addEventListener('change', (e) => {
+            currentOptions.show_hints = e.target.checked;
+        });
+        document.getElementById('cm-toggle-auto').addEventListener('change', (e) => {
+            currentOptions.auto_move = e.target.checked;
+        });
+
       }
 
       if (!document.querySelector('.cm-eval-container')) {
@@ -493,7 +550,7 @@
 
     attachToBoard(board) {
       this.boardElement = board;
-      console.log('[ChessMint Pro] Attached to Chessboard!');
+      console.log('🔗 [ChessMint Pro] Berhasil menempel ke Papan Catur!');
 
       this.boardDrawer = new BoardDrawer(board);
       this.uiManager = new UIManager(board);
