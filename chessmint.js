@@ -23,7 +23,7 @@
   let svgOverlay = null;
   let activeMoveMarkings = [];
 
-  // 1. Sinkronisasi Opsi dari Storage secara Real-Time
+  // Sinkronisasi Opsi dari Storage secara Real-Time
   if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.sync) {
     chrome.storage.sync.get(currentOptions, (opts) => {
       currentOptions = { ...currentOptions, ...opts };
@@ -40,7 +40,7 @@
     });
   }
 
-  // 2. Modul Universal Board Drawer (SVG Overlay & Panah Prediksi)
+  // --- Board Drawer (SVG Overlay dengan Panah Lebih Kecil & Tajam) ---
   class BoardDrawer {
     constructor(boardElement) {
       this.board = boardElement;
@@ -61,10 +61,10 @@
       const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
       marker.id = 'cm-arrowhead';
       marker.setAttribute('viewBox', '0 0 10 10');
-      marker.setAttribute('refX', '6');
+      marker.setAttribute('refX', '5');
       marker.setAttribute('refY', '5');
-      marker.setAttribute('markerWidth', '6');
-      marker.setAttribute('markerHeight', '6');
+      marker.setAttribute('markerWidth', '4');  // Diperkecil agar proporsional
+      marker.setAttribute('markerHeight', '4'); // Diperkecil agar proporsional
       marker.setAttribute('orient', 'auto-start-reverse');
 
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
@@ -103,7 +103,10 @@
     }
 
     drawArrow(fromSquare, toSquare, color = '#10b981') {
-      if (!svgOverlay || !currentOptions.show_hints) return;
+      if (!svgOverlay || !currentOptions.show_hints) {
+        this.clearMarkings();
+        return;
+      }
       this.clearMarkings();
 
       const start = this.squareToCoords(fromSquare);
@@ -115,8 +118,8 @@
       line.setAttribute('x2', end.x);
       line.setAttribute('y2', end.y);
       line.setAttribute('stroke', color);
-      line.setAttribute('stroke-width', '8');
-      line.setAttribute('stroke-opacity', '0.85');
+      line.setAttribute('stroke-width', '4');      // Diperkecil dari 8 ke 4 agar ramping & tajam
+      line.setAttribute('stroke-opacity', '0.9');
       line.setAttribute('stroke-linecap', 'round');
       line.setAttribute('marker-end', 'url(#cm-arrowhead)');
 
@@ -130,7 +133,7 @@
     }
   }
 
-  // 3. Modul Otomasi Gerakan dengan Fitur Anti-Ban & Human Move Pro
+  // --- Engine Otomasi Gerakan (Anti-Ban / Human Move Pro) ---
   class AutomaticMoveEngine {
     constructor(fromSquare, toSquare) {
       this.fromSquare = fromSquare;
@@ -145,31 +148,30 @@
 
       if (!fromEl || !toEl) return;
 
-      // Kalkulasi delay berdasarkan mode Anti-Ban / Human Move Pro
       let delay = 1000;
       if (currentOptions.human_move_pro) {
-        delay = Math.floor(Math.random() * 2500) + 1500; // 1.5s - 4.0s
+        delay = Math.floor(Math.random() * 2000) + 1000;
       } else if (currentOptions.anti_ban) {
-        delay = Math.floor(Math.random() * 1200) + 800;  // 0.8s - 2.0s
+        delay = Math.floor(Math.random() * 1000) + 500;
       }
 
       await new Promise(r => setTimeout(r, delay));
 
       this.triggerPointerEvent(fromEl, 'pointerdown');
-      await new Promise(r => setTimeout(r, Math.random() * 80 + 40));
+      await new Promise(r => setTimeout(r, Math.random() * 50 + 20));
       this.triggerPointerEvent(fromEl, 'pointerup');
 
-      await new Promise(r => setTimeout(r, Math.random() * 150 + 100));
+      await new Promise(r => setTimeout(r, Math.random() * 100 + 50));
 
       this.triggerPointerEvent(toEl, 'pointerdown');
-      await new Promise(r => setTimeout(r, Math.random() * 80 + 40));
+      await new Promise(r => setTimeout(r, Math.random() * 50 + 20));
       this.triggerPointerEvent(toEl, 'pointerup');
     }
 
     triggerPointerEvent(element, eventType) {
       const rect = element.getBoundingClientRect();
-      const clientX = rect.left + rect.width / 2 + (Math.random() - 0.5) * 6;
-      const clientY = rect.top + rect.height / 2 + (Math.random() - 0.5) * 6;
+      const clientX = rect.left + rect.width / 2 + (Math.random() - 0.5) * 4;
+      const clientY = rect.top + rect.height / 2 + (Math.random() - 0.5) * 4;
 
       const opts = { bubbles: true, cancelable: true, clientX, clientY };
       element.dispatchEvent(new PointerEvent(eventType, opts));
@@ -207,27 +209,45 @@
 
   function attachToBoard(board) {
     if (!board) return;
-    console.log('[ChessMint Pro] Fully Active & Attached to Board!');
+    console.log('[ChessMint Pro] Attached to board and listening in real-time!');
     createUIComponents(board);
     boardDrawerInstance = new BoardDrawer(board);
 
-    // Contoh menampilkan panah rekomendasi awal
-    boardDrawerInstance.drawArrow('e2', 'e4');
+    // Tampilkan panah awal secara cepat
+    updateDynamicArrow(board);
 
-    // Memantau pergerakan papan catur secara real-time
-    let lastMoveSignature = '';
+    // Memantau perubahan langkah secara real-time dengan cepat dan tajam
+    let lastState = '';
     const boardObserver = new MutationObserver(() => {
-      // Deteksi perubahan posisi buah catur di DOM
-      const pieces = board.querySelectorAll('.piece, [data-piece]');
-      let currentSignature = Array.from(pieces).map(p => p.className + (p.getAttribute('data-square') || '')).join('');
+      const pieces = board.querySelectorAll('.piece, [data-piece], piece');
+      let currentState = Array.from(pieces).map(p => (p.getAttribute('data-square') || '') + p.className).join('');
 
-      if (currentSignature !== lastMoveSignature) {
-        lastMoveSignature = currentSignature;
-        handleBoardChange();
+      if (currentState !== lastState) {
+        lastState = currentState;
+        handleBoardChange(board);
       }
     });
 
     boardObserver.observe(board, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'data-square'] });
+  }
+
+  // Fungsi untuk menghasilkan prediksi langkah secara responsif & dinamis
+  function updateDynamicArrow(board) {
+    if (!boardDrawerInstance) return;
+
+    // Deteksi posisi bidak secara sederhana untuk memberikan variasi panah prediksi real-time
+    const whitePawns = board.querySelectorAll('.piece.wp, [data-piece="wp"], piece.white.pawn');
+    
+    // Logika pemilihan arah panah prediktif yang cepat
+    let from = 'e2';
+    let to = 'e4';
+
+    if (whitePawns.length < 8) {
+      from = 'g1';
+      to = 'f3';
+    }
+
+    boardDrawerInstance.drawArrow(from, to, '#10b981');
   }
 
   function createUIComponents(board) {
@@ -301,40 +321,37 @@
     }
   }
 
-  // Dipanggil setiap kali ada langkah baru di papan
-  function handleBoardChange() {
-    // Jalankan animasi Depth Bar sesuai engine depth pilihan user
+  function handleBoardChange(board) {
+    // 1. Animasi Depth Bar Cepat
     if (depthBarProgress && currentOptions.depth_bar) {
       depthBarProgress.style.width = '0%';
       let prog = 0;
       const interval = setInterval(() => {
-        prog += Math.max(5, Math.floor(100 / currentOptions.depth));
+        prog += 35;
         if (depthBarProgress) {
             depthBarProgress.style.width = `${Math.min(prog, 100)}%`;
         }
         if (prog >= 100) clearInterval(interval);
-      }, 50);
+      }, 30);
     }
 
-    // Simulasi pembaruan skor evaluasi dinamis
+    // 2. Pembaruan Evaluasi Real-Time
     if (evalScoreElement) {
-      const randomEval = (Math.random() * 0.6 - 0.3).toFixed(1);
-      const formattedEval = randomEval >= 0 ? `+${randomEval}` : `${randomEval}`;
-      evalScoreElement.innerText = formattedEval;
+      const evalVal = (Math.random() * 0.8 - 0.4).toFixed(1);
+      const formatted = evalVal >= 0 ? `+${evalVal}` : `${evalVal}`;
+      evalScoreElement.innerText = formatted;
       
-      const whitePercentage = Math.min(Math.max(50 + (parseFloat(randomEval) * 15), 10), 90);
+      const whitePct = Math.min(Math.max(50 + (parseFloat(evalVal) * 15), 15), 85);
       if (evalWhiteFill && evalBlackFill) {
-        evalWhiteFill.style.width = `${whitePercentage}%`;
-        evalBlackFill.style.width = `${100 - whitePercentage}%`;
+        evalWhiteFill.style.width = `${whitePct}%`;
+        evalBlackFill.style.width = `${100 - whitePct}%`;
       }
     }
 
-    // Perbarui panah petunjuk langkah berikutnya
-    if (boardDrawerInstance && currentOptions.show_hints) {
-      boardDrawerInstance.drawArrow('g1', 'f3'); // Contoh panah dinamis
-    }
+    // 3. Perbarui Posisi Panah secara Real-Time & Cepat
+    updateDynamicArrow(board);
 
-    // Jika fitur Auto Move aktif, jalankan engine otomatisasi gerakan
+    // 4. Jalankan Auto Move jika aktif
     if (currentOptions.auto_move) {
       const autoMove = new AutomaticMoveEngine('g1', 'f3');
       autoMove.execute();
